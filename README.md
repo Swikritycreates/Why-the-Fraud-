@@ -97,14 +97,6 @@ These findings highlight the importance of focusing fraud detection efforts on c
 * Logistic Regression
 * Statistical Inference
 
-## Repository Structure
-
-```text
-├── finalproject.qmd       # Quarto source file
-├── finalproject.html      # Rendered report
-├── data/                  # Dataset (if included)
-└── README.md
-```
 
 ## Authors
 
