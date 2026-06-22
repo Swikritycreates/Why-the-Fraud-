@@ -1,0 +1,370 @@
+---
+title: "What Characteristics Are Associated with Insurance Fraud?"
+author: "Nandir Altansukh, Swikriti Dumre, Hadiya Abdi"
+format:
+  html:
+    embed-resources: true
+---
+
+```{r}
+#| echo: false
+#| warning: false
+library(tidyverse)
+library(Stat2Data)
+library(readxl)
+library(ggplot2)
+library(scales)
+library(knitr)
+library(pROC)
+```
+## Introduction
+
+In many insurance companies, insurance fraud continues to be a major issue, which leads to financial losses for them and higher costs for policyholders. Fraudulent claims can have many influences, whether that is in insurance policy structure, the size of claims being filed, or even within the industry itself. With this research study, the aim is to explore and understand which characteristics are associated with fraudulent behavior, specifically which ones are increasingly important for insurance companies. - Data source: This research uses the Insurance Fraud Detection data set sourced from Kaggle, originally collected as part of a project at the Indian Institute of Management Calcutta. The data set contains 1,000 observations of vehicle insurance claims, each representing a unique policyholder. The main research question addresses: - Does claim size and financial status increase the probability of insurance fraud? To answer the main question, the research paper divides the analysis into three sections focusing on different possible predictors of fraud, including financial background, claim incentives, and demographic characteristics that may influence fraud likelihood.
+
+The sub-questions explored in this research are:
+
+1)  How does the magnitude of an insurance claim affect the likelihood of fraud?
+2)  How do an individual’s financial characteristics relate to the likelihood of committing insurance fraud?
+3)  Do insurance policy characteristics influence the likelihood of fraud?
+
+## Data 
+### Claim Size and Payout Incentive
+
+-   `total_claim_amount`: Total dollar value of the insurance claim filed, ranging from \$100 to \$114,920.
+-   `age`: Age of the insured in years.
+-   `months_as_customer`: Number of months the individual has held a policy.
+-   `insured_sex`: Categorical variable indicating sex of the insured (Female = baseline, Male).
+-   `incident_severity`: Categorical variable indicating damage level of the incident (Major Damage = baseline, Minor Damage, Total Loss, Trivial Damage).
+
+### Policy Structure
+
+-   `policy_annual_premium`: The total amount the policyholder has to pay each year for insurance coverage.
+-   `policy_deductable`: The amount paid by the insured person out of their own pocket towards any damage or loss before the insurance provider covers the rest of the claim.
+-   `umbrella_limit`: The maximum amount of extra liability coverage available to pay for a claim after primary insurance limits have been completely used up.
+-   `policy_csl`: A policy plan that covers all costs from an accident and serves as a maximum cap amount.
+
+### Financial Background
+
+-   `capital.gains`: Capital gains reported by the insured individual.
+-   `capital.loss`: Capital losses reported by the insured individual.
+-   `insured_education_level`: Categorical variable indicating the highest level of education attained by the insured (baseline: Associate).
+-   `insured_occupation`: Categorical variable indicating the occupation of the insured (baseline: adm-clerical).
+
+## Analysis
+
+### Claim Size and Payout Incentive
+
+We fit two logistic regression models with fraud status as the response (1 = fraud, 0 = no fraud). The first included only `total_claim_amount`. The second added `age`, `months_as_customer`, `insured_sex`, and `incident_severity` as covariates to see if the effect of claim size held after controlling for other factors. We checked the linearity assumption using an empirical logit plot and used a likelihood ratio test to compare the two models.
+
+```{r}
+#| echo: false
+#| warning: false
+fraud <- read_excel("insurancedataset.xlsx")
+
+fraud_clean <- fraud |>
+  mutate(
+    fraud_binary = if_else(fraud_reported == "Y", 1, 0),
+    fraud_reported = as.factor(fraud_reported)
+  ) |>
+  filter(!is.na(total_claim_amount), !is.na(fraud_reported))
+```
+
+```{r}
+#| label: fig-claim-boxplot
+#| fig-cap: "Total Claim Amount by Fraud Status"
+#| echo: false
+#| warning: false
+ggplot(fraud_clean,
+       aes(x = fraud_reported, y = total_claim_amount, fill = fraud_reported)) +
+  geom_boxplot() +
+  labs(
+    title = "Total Claim Amount by Fraud Status",
+    x = "Fraud Reported",
+    y = "Total Claim Amount ($)"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+```{r}
+#| label: fig-emplogit
+#| fig-cap: "Empirical Logit Plot for Total Claim Amount"
+#| echo: false
+#| warning: false
+emplogitplot1(fraud_binary ~ total_claim_amount,
+              data = fraud_clean,
+              ngroups = 10)
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| output: false
+model1 <- glm(fraud_binary ~ total_claim_amount,
+              data = fraud_clean,
+              family = binomial)
+summary(model1)
+exp(coef(model1))
+exp(confint(model1))
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| output: false
+model2 <- glm(fraud_binary ~ total_claim_amount + age + months_as_customer +
+                insured_sex + incident_severity,
+              data = fraud_clean,
+              family = binomial)
+summary(model2)
+exp(coef(model2))
+exp(confint(model2))
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| output: false
+anova(model1, model2, test = "LRT")
+```
+
+### Policy Structure
+```{r}
+#| echo: false
+#| warning: false
+library(tidyverse)
+library(readxl)
+insurance_fraud <- read_excel("insurancedataset.xlsx") |>
+  select(policy_annual_premium, policy_deductable, umbrella_limit, policy_csl, fraud_reported) |>
+  mutate(fraud_reported = ifelse(fraud_reported == "Y", 1, 0)) |> drop_na()
+```
+
+We converted the Y and N values of `fraud_reported` to 1 and 0 in order to perform logistic regression. Likewise, we factored `policy_csl` into categorical, because they are a type of policy insured to people and should not be numerically computed. In our raw data, we observed umbrella limits of $-1,000,000$. In a real world scenario, insurance limits cannot be negative; therefore, we interpreted this value as having no umbrella limit policy and replaced it with $0$.
+
+#### Summary on Raw Data
+```{r}
+#| echo: false
+#| warning: false
+insurance_fraud <- insurance_fraud |>
+ mutate(umbrella_limit = ifelse(umbrella_limit == -1000000, 0, umbrella_limit))
+```
+
+```{r}
+#| echo: false
+#| warning: false
+insurance_fraud$policy_csl <- as.factor(insurance_fraud$policy_csl)
+```
+
+```{r}
+#| echo: false
+#| results: hide
+summary(insurance_fraud[, c("policy_annual_premium",
+                      "policy_deductable",
+                      "umbrella_limit",
+                      "policy_csl")])
+```
+
+```{r}
+#| label: tbl-variable-summary
+#| tbl-cap: Summary of Policy Structure Variables 
+#| echo: false
+library(knitr)
+coefficient_table <- tibble(
+  Policy_Annual_Premium = c("Min: 433.3", "1st Qu.:1089.6", " Median :1257.2", "Mean  :1256.4","3rd Qu.:1415.7", "Max.   :2047.6"),
+  Policy_Deductable = c("   Min: 500", "1st Qu: 500", " Median :1000", " Mean:1136", "3rd Qu.:2000", "Max   :2000"),
+  Umbrella_limit = c("Min: 0", "1st Qu: 0", "Median: 0", "Mean   : 1102000 ", "3rd Qu.: 0", "Max:10000000 "),
+  Policy_csl = c(" 100/300 :349 ", "250/500 :351  ", "500/1000:300 ", "", "", ""),
+)
+
+kable(coefficient_table)
+```
+
+Through @tbl-variable-summary, we can infer that `policy_annual_premium` and `policy_deductable` do not have extreme outliers and the number of policy holders are equally divided into all three categories of `polic_csl`. Likewise, we observe that `umbrella_limit` has 1st quartile, median and 3rd quartile as 0; however, it has a mean of $1102000$. This suggests that more than $75\%$ of insured people do not have an umbrella policy, but the smaller group of people who have umbrella policy have very high limits maximizing until $10000000$.
+
+```{r}
+#| echo: false
+#| warning: false
+#| label: fig-umbrellalimit-freq
+library(ggplot2)
+library(scales)
+
+p_hist <- ggplot(insurance_fraud, aes(x = umbrella_limit, fill = as.factor(fraud_reported))) +
+  geom_histogram(bins = 15, position = "dodge", color = "white") +
+  scale_x_continuous(labels = label_comma()) +
+  theme_minimal() +
+  labs(
+    title = "Frequency of Umbrella Limits by Fraud Status",
+    x = "Umbrella Limit ($)",
+    y = "Count of Policies",
+    fill = "Fraud Reported"
+  )
+
+print(p_hist)
+```
+
+From @fig-umbrellalimit-freq, we observe that higher cases of insurance claims are from policyholders who have 0 umbrella_limit. In this fig, the number of people who committed insurance fraud is $3$ times less than people who did not commit insurance fraud. However, as the umbrella limits has significant gaps between their values, we observe a drop in the number of policy holders over all. Despite the drop, the trend in the proportion of insurance frauds remains almost consistent with a fluctuation in $2500000$ where the insurance frauds are almost null.
+
+#### Likelihood Ratio Testing
+
+```{r}
+#| echo: false
+#| warning: false
+#| results: hide
+null_model <- glm(fraud_reported ~ 1, data = insurance_fraud, family = binomial)
+policy_structure_model <- glm(fraud_reported ~ policy_annual_premium + policy_deductable + umbrella_limit + policy_csl, data=insurance_fraud, family = binomial)
+anova(null_model, policy_structure_model, test = "Chisq")
+```
+
+We performed a Likelihood Ratio Test against a null model and a policy structure model that included `policy_annual_premium`, `policy_deductable`, `umbrella_limit` and `policy_csl`. Through this test, we observed an insignificant residual deviance of $5.8$ moving from null model to model with 4 predictors ($p = 0.32 > 0.05$). This suggests that the predictors are not statistically significant to predict the insurance fraud committed by the policy holders.
+
+```{r}
+#| echo: false
+#| warning: false
+#| results: hide
+summary(policy_structure_model)$coefficients
+```
+
+In order to observe the nature of the relationship between the predictors and reported fraud, we also summarized our model. While all the coefficients have values less than $z < 3$ and $p > 0.05$, our leading indicator is `umbrealla_limit` with ($z = 1.84 \, ,\, p = 0.06$). This reiterates our initial summary findings that the umbrella limit has a weak role in predicting insurance fraud.
+
+### Financial Background
+
+Using a logistic regression model to estimate the probability of insurance fraud as a function of education and financial characteristics we will have the statistical model below: $$log(p/1-p) = B_0 + B_1(Capital gains) + B_2(Capital loss) + B_3(insuredEducation) + B_4(insuredOccupation)$$ With significance test we can determine whether each categorical variable in the logistic model have an effect on the log-odds of insurance fraud or not.
+
+-   The null hypothesis for this model: $$H_0:B_i = 0$$ The variable has no effect on the log odds of insurance fraud. We can either provide or reject the hypothesis depending on whether coefficient estimates for the p-value are less than the alpha point of 0.05 or greater.
+
+-   The alternative hypothesis test is: $$H_A: B_i, doesnt. = 0$$ which means the variable does affect the likelihood of insurance fraud.
+
+The logistic regression model would be evaluated by looking at coefficient estimates using maximum likelihood estimation and significance z-values and p-values.
+
+```{r}
+#| echo: false
+#| warning: false
+
+Insurance <- read_excel("insurancedataset.xlsx")
+colnames(Insurance) <- make.names(colnames(Insurance))
+Insurance <- Insurance |>
+  mutate(across(where(is.character), ~ na_if(., "?"))) |>
+  na.omit() |>
+  mutate(
+    fraud_reported = ifelse(fraud_reported == "Y", 1, 0),
+    insured_education_level = as.factor(insured_education_level),
+    insured_occupation = as.factor(insured_occupation)
+  )
+```
+
+```{r}
+#| echo: false
+#| warning: false
+library(knitr)
+model_finance <- glm(fraud_reported ~ capital.gains + capital.loss +
+                       insured_education_level + insured_occupation,
+                     data = Insurance,
+                     family = "binomial")
+summary(model_finance)
+```
+
+#### Interpretation:
+
+Looking at the summary table: Capital Gains with a p-value of 0.6641 and capital loss with a p-value of 0.8287 are both not statistically significant, which shows that they don't have any strong evidence and relationship associated with fraud. A direct financial gains or losses doesn't affect the likelihood of insurance fraud as proven. Similarly the education level variables are also not significant indicating the same conclusion that there is no strong evidence that educational attainment influences fraud behavior. This goes for all different level of the education variable: - level: College $$p-value: 0.89 > 0.05$$ - level: High School$$p-value: 0.1136  > 0.05$$\
+- level:JD $$p-value: 0.4011 > 0.05$$ - level: Masters $$p-value: 0.4886 > 0.05 $$ - level: MD $$p-value: 0.8107 > 0.05$$ - level: PhD $$p-value: 0.3091 > 0.05$$\
+The only variable showing any significant relation with fraud report is the following occupations:
+
+insured_occupation: exec-managerial with a p-value of 0.0789 . insured_occupation: farming-fishing with a p-value of 0.0532 insured_occupation: sales with a p-value of 0.0684. insured_occupation: tech-support with a p-value of 0.0518. It indicates that occupation may play a role in explaining fraud likelihood and suggests a link to socioeconomic background and fraud.
+
+##### Odds ratio:
+```{r}
+#| echo: false
+#| warning: false
+#| tbl-cap: Summary of Odd Ratios 
+exp(coef(model_finance))[c(
+  "insured_occupationexec-managerial",
+  "insured_occupationfarming-fishing",
+  "insured_occupationsales",
+  "insured_occupationtech-support"
+)]
+```
+##### Odd Ratio Interpretation:
+
+-   exec-managerial: Individuals working in executive/ managerial occupations have approximately 3.9 times higher odds of committing insurance fraud compared to the baseline occupation category\[adm-clerical\] while holding all other variables constant.
+-   Farming-fishing: Individuals in farming and fishing occupations have about 4.6 times higher odds of fraud relative to the reference group\[adm-clerical\].
+-   sales: Individuals in sales occupations have nearly 3.9 times higher odds of fraud.
+-   tech-support: Individuals working in tech-support occupations have approximately 4.3 times higher odds of insurance fraud compared to the baseline occupation category\[adm-clerical\].
+
+##### Confidence Interval
+```{r}
+#| echo: false
+#| warning: false
+#| tbl-cap: Summary of Confidence intervals 
+exp(confint(model_finance))[c(
+  "insured_occupationexec-managerial",
+  "insured_occupationfarming-fishing",
+  "insured_occupationsales",
+  "insured_occupationtech-support"
+), ]
+```
+##### Interpretation:
+
+The confidence intervals provide the plausible values for the true odds ratios for the following occupational variables:
+
+-   exec-managerial has a 95% confidence interval of approximately (0.92, 20.78).
+-   farming-fishing has a confidence interval of (1.05, 25.24).
+-   sales has a confidence interval of (0.99, 19.54).
+-   tech-support has a confidence interval of (1.08, 22.05).
+
+farming-fishing and tech-support intervals are mostly above 1, which shows a stronger evidence that these occupations are associated with increased fraud odds. On the other hand the confidence intervals for exec managerial and sales indicate that they marginally significant rather than strong significance.
+
+However, the intervals are very wide, indicating uncertainty in the estimates. It suggests while the occupations may be associated with higher fraud likelihood, the exact magnitude of the relationship is hard to estimate precisely.
+
+Overall, occupation may influence fraud likelihood compared to capital gain and loss, however it should be interpreted cautiously.
+
+##### Model Performance:
+```{r}
+#| echo: false
+#| warning: false
+prob <- predict(model_finance, type = "response")
+pred_class <- ifelse(prob > 0.5, 1, 0)
+table(Predicted = pred_class, Actual = Insurance$fraud_reported)
+```
+As already established with significance, we can see it in false positive and negative analysis that the model classifies all observations as non fraud cases. it identifies 253 non-fraud observations(true negative) but failed to identify correctly any fraud cases, resulting in 87 false negatives. The model has poor sensitivity and predicts majority. The overall predictive performance of the model remains for practical fraud detection purposes.However the model still provides insight into relationships between variables and fraud likelihood, but shouldn't be considered highly reliable.
+
+##### Roc Curve
+```{r}
+#| label: fig-roc
+#| fig-cap: "ROC Curve for Financial Background Model"
+#| echo: false
+#| warning: false
+#| tbl-cap: Summary of Auc
+roc_obj <- roc(Insurance$fraud_reported, prob)
+plot(roc_obj)
+auc(roc_obj)
+```
+
+The Roc curve lies above the grey diagonal line indicating that the model performs better than random classifications. Due to it not reaching the top-left it shows that it has only a moderate ability to distinguish between fraud and fraud claims. Although it captures meaningful patterns its predictive accuracy is limited. The areas under the curve is 0.6622 which supports the conclusion of the roc curve.
+
+## Results
+
+### Claim Size and Payout Incentive
+
+247 out of 1,000 observations (24.7%) were fraudulent. Total claim amounts ranged from \$100 to \$114,920 with a median of \$58,055. The boxplot showed that fraudulent claims had a higher median and tighter spread than non-fraudulent ones. The empirical logit plot confirmed the linearity assumption.
+
+In the simple model, `total_claim_amount` was significant ($p < 0.001$), with an odds ratio of 1.0000158 per dollar — about a 17% increase in fraud odds for every \$10,000 increase in claim amount (95% CI: 1.0000098, 1.0000220). Once covariates were added, `total_claim_amount` became insignificant ($p = 0.691$), suggesting `incident_severity` was confounding the relationship. All three severity levels showed significantly lower odds of fraud compared to Major Damage (all $p < 0.001$):
+
+-   Minor Damage: OR = 0.080
+-   Total Loss: OR = 0.097
+-   Trivial Damage: OR = 0.052
+
+The likelihood ratio test confirmed the full model fit significantly better ($\chi^2$ = 220.73, df = 6, $p < 0.001$).
+
+### Policy Structure
+
+We would conclude that policy structure does not play a statistically significant role in predicting if policy holders will be committing any insurance frauds.This means that policy holder with smaller total limit is just as likely to commit fraud as a policy holder with higher total limit. Therefore, any adjustments in deductibles or premiums would deter a policy holder from committing insurance fraud.
+
+### Financial Background
+
+Financial characteristics such as capital gains, capital losses, and education level do not show a significant relationship with the likelihood of committing insurance fraud. However, some occupation categories showed marginal significance: exec-managerial ($p = 0.079$), farming-fishing ($p = 0.053$), sales ($p = 0.068$), and tech-support ($p = 0.052$). The odds ratios for these groups relative to the adm-clerical baseline were 3.9, 4.6, 3.9, and 4.3 respectively, though confidence intervals are wide, indicating uncertainty in the estimates. The model's ROC curve lies above the diagonal with an AUC of 0.6622, suggesting moderate discriminatory ability but limited practical predictive accuracy.
+
+## Discussion
+
+Across all three sections, none of the variable groups were strong independent predictors of insurance fraud. Claim size looked significant on its own but lost its effect once incident severity was added, meaning Major Damage claims — not raw dollar amounts — are what's actually associated with fraud. Policy structure variables showed no significant relationship with fraud at all, suggesting that premium levels, deductibles, and coverage limits don't influence fraudulent behavior. For financial background, capital gains, losses, and education level were all insignificant, though a few occupation categories showed marginal associations.
+
+The clearest takeaway is that incident severity is the strongest signal across all three sections. The nature of the incident matters more than how much the claim is worth, what kind of policy someone has, or their financial background.
